@@ -164,6 +164,7 @@ typedef struct {
 } wifi_csi_config_t;
 
 typedef struct {
+    uint8_t bssid[6];
     uint8_t primary;
 } wifi_ap_record_t;
 
@@ -182,7 +183,20 @@ static inline esp_err_t esp_wifi_set_csi_rx_cb(void *cb, void *ctx) { (void)cb; 
 static inline esp_err_t esp_wifi_set_csi(bool en) { (void)en; return ESP_OK; }
 static inline esp_err_t esp_wifi_set_channel(uint8_t ch, wifi_second_chan_t sc) { (void)ch; (void)sc; return ESP_OK; }
 static inline esp_err_t esp_wifi_80211_tx(wifi_interface_t ifx, const void *b, int len, bool en) { (void)ifx; (void)b; (void)len; (void)en; return ESP_OK; }
-static inline esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap) { (void)ap; return ESP_FAIL; }
+static inline esp_err_t esp_wifi_get_mac(wifi_interface_t ifx, uint8_t mac[6]) {
+    static const uint8_t stub_mac[6] = {0x02, 0, 0, 0, 0, 1};
+    (void)ifx;
+    if (!mac) return ESP_ERR_INVALID_ARG;
+    memcpy(mac, stub_mac, sizeof(stub_mac));
+    return ESP_OK;
+}
+static inline esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap) {
+    static const uint8_t stub_bssid[6] = {0x02, 0, 0, 0, 0, 2};
+    if (!ap) return ESP_ERR_INVALID_ARG;
+    memcpy(ap->bssid, stub_bssid, sizeof(stub_bssid));
+    ap->primary = CONFIG_CSI_WIFI_CHANNEL;
+    return ESP_OK;
+}
 static inline const char *esp_err_to_name(esp_err_t code) { (void)code; return "STUB"; }
 
 /* ---- NVS stubs ---- */
