@@ -96,6 +96,11 @@ void nvs_config_load(nvs_config_t *cfg)
     cfg->filter_mac_set = 0;
     memset(cfg->filter_mac, 0, 6);
 
+    /* ADR-152: Existing installations remain passive until explicitly provisioned. */
+    cfg->probe_role = PROBE_ROLE_PASSIVE;
+    cfg->probe_interval_ms = 50;
+    cfg->probe_transport = PROBE_TRANSPORT_RAW_NULL;
+
     /* Try to override from NVS */
     nvs_handle_t handle;
     esp_err_t err = nvs_open("csi_cfg", NVS_READONLY, &handle);
@@ -300,6 +305,44 @@ void nvs_config_load(nvs_config_t *cfg)
         ESP_LOGI(TAG, "NVS override: filter_mac=%02x:%02x:%02x:%02x:%02x:%02x",
                  cfg->filter_mac[0], cfg->filter_mac[1], cfg->filter_mac[2],
                  cfg->filter_mac[3], cfg->filter_mac[4], cfg->filter_mac[5]);
+    }
+
+    /* ADR-152: Controlled probe role, cadence, and transport. */
+    uint8_t probe_role_val;
+    if (nvs_get_u8(handle, "probe_role", &probe_role_val) == ESP_OK) {
+        if (probe_role_val <= PROBE_ROLE_RX) {
+            cfg->probe_role = probe_role_val;
+            ESP_LOGI(TAG, "NVS override: probe_role=%u", (unsigned)cfg->probe_role);
+        } else {
+            ESP_LOGW(TAG, "NVS probe_role=%u invalid, using passive", (unsigned)probe_role_val);
+        }
+    }
+
+    uint16_t probe_interval_val;
+    if (nvs_get_u16(handle, "probe_int", &probe_interval_val) == ESP_OK) {
+        if (probe_interval_val >= 20 && probe_interval_val <= 1000) {
+            cfg->probe_interval_ms = probe_interval_val;
+            ESP_LOGI(TAG, "NVS override: probe_interval_ms=%u", cfg->probe_interval_ms);
+        } else {
+            ESP_LOGW(TAG, "NVS probe_int=%u outside [20..1000], using %u",
+                     probe_interval_val, cfg->probe_interval_ms);
+        }
+    }
+
+    uint8_t probe_transport_val;
+    if (nvs_get_u8(handle, "probe_xport", &probe_transport_val) == ESP_OK) {
+        if (probe_transport_val <= PROBE_TRANSPORT_UDP_BROADCAST) {
+            cfg->probe_transport = probe_transport_val;
+            ESP_LOGI(TAG, "NVS override: probe_transport=%u",
+                     (unsigned)cfg->probe_transport);
+        } else {
+            ESP_LOGW(TAG, "NVS probe_xport=%u invalid, using raw_null",
+                     (unsigned)probe_transport_val);
+        }
+    }
+
+    if (cfg->probe_role == PROBE_ROLE_RX && !cfg->filter_mac_set) {
+        ESP_LOGW(TAG, "probe_role=rx without filter_mac; controlled CSI will fail closed");
     }
 
     /* ADR-066: Swarm bridge */

@@ -19,6 +19,7 @@ import provision  # noqa: E402  — sibling import after sys.path tweak
 def _mk_args(**overrides) -> argparse.Namespace:
     """Build a Namespace with every mergeable attr set to None unless overridden."""
     base = {name: None for name in provision.MERGEABLE_ATTRS}
+    base.update(clear_tdm=False, clear_filter_mac=False)
     base.update(overrides)
     return argparse.Namespace(**base)
 
@@ -112,6 +113,71 @@ class TestMerge(unittest.TestCase):
         merged = provision.merge_state_into_args(args, prior)
         self.assertEqual(args.node_id, 0)
         self.assertEqual(merged["node_id"], 0)
+
+    def test_controlled_probe_settings_survive_partial_update(self):
+        args = _mk_args(probe_transport="udp_broadcast")
+        prior = {
+            "probe_role": "rx",
+            "probe_interval_ms": 50,
+            "probe_transport": "raw_null",
+            "filter_mac": "28:84:85:92:81:3c",
+        }
+        merged = provision.merge_state_into_args(args, prior)
+
+        self.assertEqual(args.probe_role, "rx")
+        self.assertEqual(args.probe_interval_ms, 50)
+        self.assertEqual(args.probe_transport, "udp_broadcast")
+        self.assertEqual(merged["filter_mac"], "28:84:85:92:81:3c")
+
+    def test_clear_tdm_removes_values_from_args_and_state(self):
+        args = _mk_args(clear_tdm=True)
+        merged = provision.merge_state_into_args(
+            args,
+            {"tdm_slot": 1, "tdm_total": 3, "node_id": 2},
+        )
+
+        provision.apply_clear_flags(args, merged)
+
+        self.assertIsNone(args.tdm_slot)
+        self.assertIsNone(args.tdm_total)
+        self.assertNotIn("tdm_slot", merged)
+        self.assertNotIn("tdm_total", merged)
+        self.assertEqual(merged["node_id"], 2)
+
+    def test_clear_filter_removes_value_from_args_and_state(self):
+        args = _mk_args(clear_filter_mac=True)
+        merged = provision.merge_state_into_args(
+            args,
+            {"filter_mac": "28:84:85:92:81:3c", "node_id": 1},
+        )
+
+        provision.apply_clear_flags(args, merged)
+
+        self.assertIsNone(args.filter_mac)
+        self.assertNotIn("filter_mac", merged)
+        self.assertEqual(merged["node_id"], 1)
+
+    def test_state_redaction_masks_all_supported_secrets(self):
+        redacted = provision.redact_state(
+            {
+                "ssid": "room",
+                "password": "wifi-secret",
+                "ota_psk": "ota-secret",
+                "seed_token": "seed-secret",
+                "node_id": 1,
+            }
+        )
+
+        self.assertEqual(redacted["ssid"], "room")
+        self.assertEqual(redacted["password"], "(set)")
+        self.assertEqual(redacted["ota_psk"], "(set)")
+        self.assertEqual(redacted["seed_token"], "(set)")
+        self.assertEqual(redacted["node_id"], 1)
+
+    def test_saved_state_permissions_are_owner_only(self):
+        with tempfile.TemporaryDirectory() as state_dir:
+            path = provision.save_state("COM7", state_dir, {"password": "secret"})
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
 
 
 class TestStatePathSanitization(unittest.TestCase):

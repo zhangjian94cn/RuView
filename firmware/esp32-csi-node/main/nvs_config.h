@@ -21,6 +21,19 @@
 /** Maximum channels in the hop list (must match CSI_HOP_CHANNELS_MAX). */
 #define NVS_CFG_HOP_MAX      6
 
+/** Controlled-link probe roles (ADR-152). */
+typedef enum {
+    PROBE_ROLE_PASSIVE = 0,
+    PROBE_ROLE_TX = 1,
+    PROBE_ROLE_RX = 2,
+} probe_role_t;
+
+/** Controlled-link probe transports (ADR-152). */
+typedef enum {
+    PROBE_TRANSPORT_RAW_NULL = 0,
+    PROBE_TRANSPORT_UDP_BROADCAST = 1,
+} probe_transport_t;
+
 /** Runtime configuration loaded from NVS or Kconfig defaults. */
 typedef struct {
     char     wifi_ssid[NVS_CFG_SSID_MAX];
@@ -55,6 +68,11 @@ typedef struct {
     uint8_t  csi_channel;                    /**< Explicit CSI channel override (0 = auto-detect). */
     uint8_t  filter_mac[6];                  /**< MAC address to filter CSI frames. */
     uint8_t  filter_mac_set;                 /**< 1 if filter_mac was loaded from NVS. */
+
+    /* ADR-152: Controlled probe link. */
+    uint8_t  probe_role;                     /**< probe_role_t. */
+    uint16_t probe_interval_ms;              /**< Probe cadence, 20..1000 ms. */
+    uint8_t  probe_transport;                /**< probe_transport_t. */
 
     /* ADR-066: Swarm bridge configuration */
     char     seed_url[64];                /**< Cognitum Seed base URL (empty = disabled). */

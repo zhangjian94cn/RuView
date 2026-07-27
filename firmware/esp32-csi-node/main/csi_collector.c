@@ -34,6 +34,7 @@ extern nvs_config_t g_nvs_config;
  * and all runtime paths use the local copies exclusively. */
 static uint8_t s_node_id = 1;
 static bool s_node_id_early_set = false;
+static uint8_t s_probe_role = PROBE_ROLE_PASSIVE;
 
 /* Defensive copy of MAC filter config — the CSI callback fires at 100-500 Hz
  * and reads filter_mac_set + filter_mac on every invocation. If wifi_init_sta()
@@ -41,6 +42,7 @@ static bool s_node_id_early_set = false;
  * LoadProhibited panics (observed: Core 0 panic after ~2400 callbacks). */
 static uint8_t s_filter_mac[6] = {0};
 static bool    s_filter_mac_set = false;
+static uint16_t s_probe_sequence = 0;
 
 /* ADR-057: Build-time guard — fail early if CSI is not enabled in sdkconfig.
  * Without this, the firmware compiles but crashes at runtime with:
@@ -259,6 +261,9 @@ static void wifi_csi_callback(void *ctx, wifi_csi_info_t *info)
     /* ADR-060: MAC address filtering — drop frames from non-matching sources.
      * Uses defensively-copied s_filter_mac instead of g_nvs_config (which can
      * be corrupted by wifi_init_sta — same root cause as the node_id clobber). */
+    if (s_probe_role == PROBE_ROLE_RX && !s_filter_mac_set) {
+        return;  /* Controlled receiver without source identity fails closed. */
+    }
     if (s_filter_mac_set) {
         if (memcmp(info->mac, s_filter_mac, 6) != 0) {
             return;  /* Source MAC doesn't match filter — skip frame. */
@@ -382,6 +387,12 @@ void csi_collector_set_node_id(uint8_t node_id)
                  s_filter_mac[0], s_filter_mac[1], s_filter_mac[2],
                  s_filter_mac[3], s_filter_mac[4], s_filter_mac[5]);
     }
+}
+
+void csi_collector_set_probe_role(uint8_t probe_role)
+{
+    s_probe_role = probe_role;
+    ESP_LOGI(TAG, "Early capture probe_role=%u", (unsigned)s_probe_role);
 }
 
 void csi_collector_init(void)
@@ -674,41 +685,40 @@ void csi_collector_start_hop_timer(void)
              (unsigned long)s_dwell_ms, (unsigned)s_hop_count);
 }
 
-/* ---- ADR-029: NDP frame injection stub ---- */
+/* ---- ADR-029 / ADR-152: controlled Null Data probe ---- */
 
 esp_err_t csi_inject_ndp_frame(void)
 {
-    /*
-     * TODO: Construct a proper 802.11 Null Data Packet frame.
-     *
-     * A real NDP is preamble-only (~24 us airtime, no payload) and is the
-     * sensing-first TX mechanism described in ADR-029. For now we send a
-     * minimal null-data frame as a placeholder so the API is wired up.
-     *
-     * Frame structure (IEEE 802.11 Null Data):
-     *   FC (2) | Duration (2) | Addr1 (6) | Addr2 (6) | Addr3 (6) | SeqCtl (2)
-     *   = 24 bytes total, no body, no FCS (hardware appends FCS).
-     */
     uint8_t ndp_frame[24];
     memset(ndp_frame, 0, sizeof(ndp_frame));
 
-    /* Frame Control: Type=Data (0x02), Subtype=Null (0x04) -> 0x0048 */
+    uint8_t station_mac[6];
+    wifi_ap_record_t ap_info;
+    esp_err_t err = esp_wifi_get_mac(WIFI_IF_STA, station_mac);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Probe cannot read STA MAC: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = esp_wifi_sta_get_ap_info(&ap_info);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Probe cannot read AP BSSID: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    /* Data Null, ToDS=1: Addr1=BSSID, Addr2=STA, Addr3=broadcast destination. */
     ndp_frame[0] = 0x48;
-    ndp_frame[1] = 0x00;
-
-    /* Duration: 0 (let hardware fill) */
-
-    /* Addr1 (destination): broadcast */
-    memset(&ndp_frame[4], 0xFF, 6);
-
-    /* Addr2 (source): will be overwritten by hardware with own MAC */
-
-    /* Addr3 (BSSID): broadcast */
+    ndp_frame[1] = 0x01;
+    memcpy(&ndp_frame[4], ap_info.bssid, 6);
+    memcpy(&ndp_frame[10], station_mac, 6);
     memset(&ndp_frame[16], 0xFF, 6);
 
-    esp_err_t err = esp_wifi_80211_tx(WIFI_IF_STA, ndp_frame, sizeof(ndp_frame), false);
+    uint16_t seq_ctl = (uint16_t)((s_probe_sequence++ & 0x0FFFu) << 4);
+    ndp_frame[22] = (uint8_t)(seq_ctl & 0xFFu);
+    ndp_frame[23] = (uint8_t)(seq_ctl >> 8);
+
+    err = esp_wifi_80211_tx(WIFI_IF_STA, ndp_frame, sizeof(ndp_frame), false);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "NDP inject failed: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "Null Data probe failed: %s", esp_err_to_name(err));
     }
 
     return err;

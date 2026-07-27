@@ -58,6 +58,22 @@ class ProvisionConfigValueTests(unittest.TestCase):
         self.assertEqual(values_by_key["swarm_hb"], "15")
         self.assertEqual(values_by_key["swarm_ingest"], "3")
 
+    def test_controlled_probe_values_are_written_to_csv(self):
+        args = make_args(
+            probe_role="rx",
+            probe_interval_ms=50,
+            probe_transport="udp_broadcast",
+            filter_mac="28:84:85:92:81:3c",
+        )
+
+        rows = csv_rows(provision.build_nvs_csv(args))
+        values_by_key = {row["key"]: row["value"] for row in rows}
+
+        self.assertEqual(values_by_key["probe_role"], "2")
+        self.assertEqual(values_by_key["probe_int"], "50")
+        self.assertEqual(values_by_key["probe_xport"], "1")
+        self.assertEqual(values_by_key["filter_mac"], "28848592813c")
+
 
 if __name__ == "__main__":
     unittest.main()

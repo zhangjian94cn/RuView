@@ -73,6 +73,9 @@ CONFIG_VALUE_CHECKS = [
     ("subk_count", lambda value: value is not None),
     ("channel", lambda value: value is not None),
     ("filter_mac", lambda value: value is not None),
+    ("probe_role", lambda value: value is not None),
+    ("probe_interval_ms", lambda value: value is not None),
+    ("probe_transport", lambda value: value is not None),
     ("hop_channels", lambda value: value is not None),
     ("seed_url", lambda value: value is not None),
     ("seed_token", lambda value: value is not None),
@@ -84,9 +87,13 @@ CONFIG_VALUE_CHECKS = [
 
 def has_config_value(args):
     """Return True when args include at least one NVS-writing config value."""
-    return any(
-        check(getattr(args, name, None))
-        for name, check in CONFIG_VALUE_CHECKS
+    return (
+        any(
+            check(getattr(args, name, None))
+            for name, check in CONFIG_VALUE_CHECKS
+        )
+        or bool(getattr(args, "clear_tdm", False))
+        or bool(getattr(args, "clear_filter_mac", False))
     )
 
 
@@ -106,9 +113,37 @@ MERGEABLE_ATTRS = [
     "edge_tier", "pres_thresh", "fall_thresh",
     "vital_win", "vital_int", "subk_count",
     "channel", "filter_mac",
+    "probe_role", "probe_interval_ms", "probe_transport",
     "hop_channels", "hop_dwell",
     "seed_url", "seed_token", "zone", "swarm_hb", "swarm_ingest",
 ]
+
+SENSITIVE_STATE_KEYS = {
+    "password",
+    "ota_psk",
+    "seed_token",
+}
+
+
+def redact_state(state: dict) -> dict:
+    """Return a display-safe state copy with secrets replaced."""
+    return {
+        key: "(set)" if key in SENSITIVE_STATE_KEYS and value else value
+        for key, value in state.items()
+    }
+
+
+def apply_clear_flags(args, merged: dict) -> dict:
+    """Remove explicitly cleared legacy values after additive state merging."""
+    if getattr(args, "clear_tdm", False):
+        merged.pop("tdm_slot", None)
+        merged.pop("tdm_total", None)
+        args.tdm_slot = None
+        args.tdm_total = None
+    if getattr(args, "clear_filter_mac", False):
+        merged.pop("filter_mac", None)
+        args.filter_mac = None
+    return merged
 
 
 def _default_state_dir() -> str:
@@ -146,13 +181,14 @@ def load_state(port: str, state_dir: str) -> dict:
 
 def save_state(port: str, state_dir: str, state: dict) -> str:
     """Write `state` to the per-port file, creating dirs as needed. Returns path."""
-    os.makedirs(state_dir, exist_ok=True)
+    os.makedirs(state_dir, mode=0o700, exist_ok=True)
     path = _state_path_for(port, state_dir)
     # Sort keys for deterministic on-disk content (easier to diff).
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, sort_keys=True)
         f.write("\n")
+    os.chmod(tmp, 0o600)
     os.replace(tmp, path)
     return path
 
@@ -215,6 +251,15 @@ def build_nvs_csv(args):
         mac_bytes = bytes(int(b, 16) for b in args.filter_mac.split(":"))
         # NVS blob: write as hex-encoded string for CSV compatibility
         writer.writerow(["filter_mac", "data", "hex2bin", mac_bytes.hex()])
+    # ADR-152: Controlled-link probe settings
+    if args.probe_role is not None:
+        role_value = {"passive": 0, "tx": 1, "rx": 2}[args.probe_role]
+        writer.writerow(["probe_role", "data", "u8", str(role_value)])
+    if args.probe_interval_ms is not None:
+        writer.writerow(["probe_int", "data", "u16", str(args.probe_interval_ms)])
+    if args.probe_transport is not None:
+        transport_value = {"raw_null": 0, "udp_broadcast": 1}[args.probe_transport]
+        writer.writerow(["probe_xport", "data", "u8", str(transport_value)])
     # ADR-073: Multi-frequency channel hopping
     if args.hop_channels is not None:
         channels = [int(c.strip()) for c in args.hop_channels.split(",")]
@@ -329,6 +374,8 @@ def main():
     # TDM mesh settings
     parser.add_argument("--tdm-slot", type=int, help="TDM slot index for this node (0-based)")
     parser.add_argument("--tdm-total", type=int, help="Total number of TDM nodes in mesh")
+    parser.add_argument("--clear-tdm", action="store_true",
+                        help="Remove previously persisted TDM slot and node-count values")
     # Edge intelligence settings (ADR-039)
     parser.add_argument("--edge-tier", type=int, choices=[0, 1, 2],
                         help="Edge processing tier: 0=off, 1=stats, 2=vitals")
@@ -343,6 +390,14 @@ def main():
     parser.add_argument("--channel", type=int, help="CSI channel (1-14 for 2.4GHz, 36-177 for 5GHz). "
                         "Overrides auto-detection from connected AP.")
     parser.add_argument("--filter-mac", type=str, help="MAC address to filter CSI frames (AA:BB:CC:DD:EE:FF)")
+    parser.add_argument("--clear-filter-mac", action="store_true",
+                        help="Remove a previously persisted CSI source MAC filter")
+    parser.add_argument("--probe-role", choices=["passive", "tx", "rx"],
+                        help="Controlled-link role: passive, tx, or rx")
+    parser.add_argument("--probe-interval-ms", type=int,
+                        help="Controlled probe interval in ms (20-1000; 50 = 20 Hz)")
+    parser.add_argument("--probe-transport", choices=["raw_null", "udp_broadcast"],
+                        help="Controlled probe transport")
     # ADR-073: Multi-frequency channel hopping
     parser.add_argument("--hop-channels", type=str, help="Comma-separated channel list for hopping (e.g. '1,6,11')")
     parser.add_argument("--hop-dwell", type=int, default=200, help="Dwell time per channel in ms (default: 200)")
@@ -379,9 +434,10 @@ def main():
     else:
         prior = load_state(args.port, args.state_dir)
     merged = merge_state_into_args(args, prior)
+    merged = apply_clear_flags(args, merged)
 
     if args.state:
-        print(json.dumps(merged, indent=2, sort_keys=True))
+        print(json.dumps(redact_state(merged), indent=2, sort_keys=True))
         return
 
     if not has_config_value(args):
@@ -437,6 +493,12 @@ def main():
                     raise ValueError
         except ValueError:
             parser.error(f"--filter-mac contains invalid hex bytes: '{args.filter_mac}'")
+    if args.probe_interval_ms is not None and not (20 <= args.probe_interval_ms <= 1000):
+        parser.error(
+            f"--probe-interval-ms must be between 20 and 1000, got {args.probe_interval_ms}"
+        )
+    if args.probe_role == "rx" and args.filter_mac is None:
+        parser.error("--probe-role rx requires --filter-mac for a controlled link")
 
     print("Building NVS configuration:")
     if args.ssid:
@@ -468,6 +530,12 @@ def main():
         print(f"  CSI Channel:   {args.channel}")
     if args.filter_mac is not None:
         print(f"  Filter MAC:    {args.filter_mac}")
+    if args.probe_role is not None:
+        print(f"  Probe Role:    {args.probe_role}")
+    if args.probe_interval_ms is not None:
+        print(f"  Probe Interval:{args.probe_interval_ms} ms")
+    if args.probe_transport is not None:
+        print(f"  Probe Transport:{args.probe_transport}")
     if args.seed_url is not None:
         print(f"  Seed URL:      {args.seed_url}")
     if args.zone is not None:

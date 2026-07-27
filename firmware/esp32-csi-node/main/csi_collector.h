@@ -42,6 +42,13 @@ void csi_collector_init(void);
 void csi_collector_set_node_id(uint8_t node_id);
 
 /**
+ * Capture the controlled-link role before WiFi initialization.
+ *
+ * RX nodes fail closed when no source MAC filter is configured.
+ */
+void csi_collector_set_probe_role(uint8_t probe_role);
+
+/**
  * Get the runtime node_id (early capture if available, otherwise init-time).
  *
  * Other modules (edge_processing, wasm_runtime, display_ui) should prefer
@@ -99,8 +106,6 @@ void csi_collector_start_hop_timer(void);
  *
  * @return ESP_OK on success, or an error code.
  *
- * @note TODO: Full NDP frame construction. Currently sends a minimal
- *       null-data frame as a placeholder.
  */
 esp_err_t csi_inject_ndp_frame(void);
 

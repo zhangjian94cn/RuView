@@ -21,6 +21,7 @@
 #include "led_strip.h"
 
 #include "csi_collector.h"
+#include "controlled_probe.h"
 #include "stream_sender.h"
 #include "nvs_config.h"
 #include "edge_processing.h"
@@ -156,11 +157,13 @@ void app_main(void)
 
     /* Load runtime config (NVS overrides Kconfig defaults) */
     nvs_config_load(&g_nvs_config);
+    nvs_config_t controlled_probe_config = g_nvs_config;
 
     /* Capture node_id IMMEDIATELY — before wifi_init_sta() can corrupt
      * g_nvs_config. See #232/#375/#390: WiFi driver init clobbers the struct
      * on some devices, reverting node_id to the Kconfig default of 1. */
     csi_collector_set_node_id(g_nvs_config.node_id);
+    csi_collector_set_probe_role(g_nvs_config.probe_role);
 
     const esp_app_desc_t *app_desc = esp_app_get_description();
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -173,7 +176,7 @@ void app_main(void)
     ESP_LOGI(TAG, "%s CSI Node (ADR-018 / ADR-110) — v%s — Node ID: %d",
              target_name, app_desc->version, g_nvs_config.node_id);
 
-    /* Turn off onboard WS2812 LED.
+    /* Identify fixed nodes with a low-brightness onboard WS2812 color.
      * S3 dev boards put the LED on GPIO 38; C6 dev boards on GPIO 8.
      * On C6, GPIO 38 doesn't exist (only 0-30) — gate the init by target. */
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -194,7 +197,20 @@ void app_main(void)
         .flags.with_dma = false,
     };
     if (led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip) == ESP_OK) {
-        led_strip_clear(led_strip);
+        uint8_t red = 0, green = 0, blue = 0;
+        if (g_nvs_config.node_id == 1) {
+            red = 16;
+        } else if (g_nvs_config.node_id == 2) {
+            green = 16;
+        } else if (g_nvs_config.node_id == 3) {
+            blue = 16;
+        }
+        if (red || green || blue) {
+            led_strip_set_pixel(led_strip, 0, red, green, blue);
+            led_strip_refresh(led_strip);
+        } else {
+            led_strip_clear(led_strip);
+        }
     }
 
     /* ADR-110 P4: 802.15.4 mesh time-sync (C6 only).
@@ -256,6 +272,13 @@ void app_main(void)
             g_nvs_config.channel_list,
             g_nvs_config.channel_hop_count,
             g_nvs_config.dwell_ms);
+    }
+#endif
+
+#ifndef CONFIG_CSI_MOCK_SKIP_WIFI_CONNECT
+    esp_err_t probe_ret = controlled_probe_start(&controlled_probe_config);
+    if (probe_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Controlled probe task failed: %s", esp_err_to_name(probe_ret));
     }
 #endif
 
