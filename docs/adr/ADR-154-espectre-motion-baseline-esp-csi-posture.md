@@ -20,6 +20,8 @@
 - [ESPectre A/B 验收器](../../../me-esp-csi/tools/ruview_posture/espectre_evaluate.py)
 - [官方 ESP-CSI 三板应用](../../../me-esp-csi/examples/ruview-posture/README.md)
 - [Mac 三头模型实现](../../../me-esp-csi/tools/ruview_posture/model.py)
+- [定时链路冒烟工具](../../../me-esp-csi/tools/ruview_posture/link_smoke.py)
+- [独立跌倒模型训练](../../../me-esp-csi/tools/ruview_posture/train_fall.py)
 - [中文执行记录](../../../../skills/my/repo/ruview/docs/2026-07-29-espectre-esp-csi-dual-stage-plan.md)
 
 ## Decision Drivers
@@ -69,6 +71,10 @@ ESPectre 输出只拥有 `motion` 语义。`IDLE` 不能映射为 `ABSENT`，也
 长期数据面仍由 ADR-153 的官方 ESP-CSI fork 拥有。Mac 模型拆为
 Presence、Motion、Posture 三个头；跌倒在姿态通过后使用独立数据和门禁。
 模型、拓扑、协议或任一关键链路不匹配时统一输出 `UNKNOWN`。
+
+盲测报告先进入 standalone 验证模式，完成两小时稳定性测试后才能生成
+正式激活文件。跌倒使用绑定既有姿态模型、拓扑和运动校准的独立
+`fall-model.json`，新增跌倒数据不会修改已经验收的三头模型。
 
 ## Consequences
 
