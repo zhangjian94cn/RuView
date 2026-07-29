@@ -65,6 +65,9 @@ Statuses: **Proposed** (under discussion), **Accepted** (approved and/or impleme
 | [ADR-042](ADR-042-coherent-human-channel-imaging.md) | Coherent Human Channel Imaging (beyond CSI) | Proposed |
 | [ADR-134](ADR-134-csi-to-cir-time-domain-multipath.md) | First-Class Channel Impulse Response (CIR) Support | Proposed |
 | [ADR-135](ADR-135-empty-room-baseline-calibration.md) | Empty-Room Baseline Calibration (per-subcarrier Welford statistics) | Proposed |
+| [ADR-152](ADR-152-controlled-link-supervised-presence.md) | Controlled-Link Supervised Presence Detection | Superseded |
+| [ADR-153](ADR-153-official-esp-csi-posture-poc.md) | Official ESP-CSI Data Plane for the Single-Person Posture PoC | Proposed |
+| [ADR-154](ADR-154-espectre-motion-baseline-esp-csi-posture.md) | ESPectre Motion Baseline before ESP-CSI Posture | Proposed |
 
 ### Machine learning and training
 

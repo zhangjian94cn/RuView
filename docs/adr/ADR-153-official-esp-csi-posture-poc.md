@@ -7,6 +7,7 @@
 | **Scope** | One fixed room, one person, three ESP32-S3 boards |
 | **Supersedes** | ADR-152 before field acceptance |
 | **Relates to** | ADR-018, ADR-151, ADR-152 |
+| **Refined by** | ADR-154 |
 
 ## Context and Problem Statement
 
@@ -85,6 +86,11 @@ The standalone model output is `absent`, `present_still`,
 `sitting`, `lying`, or `unknown`. Fall output is only `fall_suspected`, is
 latched for ten seconds, and is marked research-only. RuView API/UI integration
 is prohibited until the locked blind test and two-hour stability run pass.
+
+[ADR-154](ADR-154-espectre-motion-baseline-esp-csi-posture.md) adds a
+temporary ESPectre motion benchmark before this data plane is deployed. It
+does not replace the ESP-CSI posture boundary or make ESPectre `IDLE` an
+occupancy result.
 
 ## Consequences
 
